@@ -210,7 +210,7 @@ def build_topic_alert(files, commit_hash, html_url, topic_name):
             alert_text += f'And <b>{count}</b> {status} actions more..\n'
         alert_text += '\n'
 
-    link_text = f'GitHub · CHUKEPC/telegram-crawler@{commit_hash}'
+    link_text = f'GitHub · CHUKEPC/telegram-crawler-public@{commit_hash}'
     alert_text += f'<a href="{html_url}">{link_text}</a>'
     
     return alert_text
