@@ -15,14 +15,10 @@ COMMIT_SHA = os.environ['COMMIT_SHA']
 # COMMIT_SHA = 'e2d725c2b3813d7c170f50b0ab21424a71466f6d' # web res
 
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
-DISCORD_BOT_TOKEN = os.environ['DISCORD_BOT_TOKEN']
 GITHUB_PAT = os.environ['GITHUB_PAT']
 
-REPOSITORY = os.environ.get('REPOSITORY', 'MarshalX/telegram-crawler')
+REPOSITORY = os.environ.get('REPOSITORY', 'CHUKEPC/telegram-crawler-public')
 ROOT_TREE_DIR = os.environ.get('ROOT_TREE_DIR', 'data')
-
-CHAT_ID = os.environ.get('CHAT_ID', '@tgcrawl')
-DISCORD_CHANNEL_ID = os.environ.get('DISCORD_CHANNEL_ID', '1116390634249523283')
 
 BASE_GITHUB_API = 'https://api.github.com/'
 GITHUB_LAST_COMMITS = 'repos/{repo}/commits/{sha}'
@@ -43,12 +39,8 @@ STATUS_TO_EMOJI = {
     'unchanged': '📝',
 }
 
-AVAILABLE_HASHTAGS = {
-    'web_tr', 'web_res', 'web', 'server', 'test_server', 'client',
-    'ios', 'macos', 'android', 'android_dl', 'mini_app', 'wallet'
-}
 HASHTAGS_PATTERNS = {
-    # regex will be more flexible. for example, in issue with double hashtag '#web #web_res' when data/res not changed
+    # Существующие паттерны
     'web_tr': os.path.join(ROOT_TREE_DIR, 'web_tr'),
     'web_res': os.path.join(ROOT_TREE_DIR, 'web_res'),
     'web': os.path.join(ROOT_TREE_DIR, 'web'),
@@ -61,7 +53,27 @@ HASHTAGS_PATTERNS = {
     'android_dl': os.path.join(ROOT_TREE_DIR, 'client', 'android-stable-dl'),
     'mini_app': os.path.join(ROOT_TREE_DIR, 'mini_app'),
     'wallet': os.path.join(ROOT_TREE_DIR, 'mini_app', 'wallet'),
+    
+    # Новые категории для топиков
+    'stable': [
+        os.path.join(ROOT_TREE_DIR, 'client', 'android-stable-dl'),
+        # добавьте другие стабильные версии
+    ],
+    'beta': [
+        os.path.join(ROOT_TREE_DIR, 'client', 'android-beta'),
+        os.path.join(ROOT_TREE_DIR, 'client', 'ios-beta'),
+        os.path.join(ROOT_TREE_DIR, 'client', 'macos-beta'),
+    ],
+    'desktop': [
+        # os.path.join(ROOT_TREE_DIR, 'client', 'macos-beta'),
+        # # добавьте пути для desktop версий
+    ],
+    'translations': [
+        os.path.join(ROOT_TREE_DIR, 'web_tr')
+    ],
+    'other': []
 }
+
 # order is important!
 PATHS_TO_REMOVE_FROM_ALERT = [
     os.path.join(ROOT_TREE_DIR, 'web_tr'),
@@ -72,17 +84,19 @@ PATHS_TO_REMOVE_FROM_ALERT = [
     os.path.join(ROOT_TREE_DIR, 'mini_app'),
 ]
 
-FORUM_CHAT_ID = '@tfcrawl'
+FORUM_CHAT_ID = '-1003131892289'
 HASHTAG_TO_TOPIC = {
-    'web': '2200',
-    'web_tr': '2202',
-    'web_res': '2206',
-    'server': '2317',
-    'ios': '2194',
-    'macos': '2187',
-    'android': '2190',
-    'android_dl': '12235',
-    'wallet': '5685',
+    'stable': 26,
+    'beta': 25, 
+    'desktop': 7,
+    'android': 6,
+    'macos': 3,
+    'ios': 4,
+    'web': 17,
+    'translations': 36,
+    'server': 31,
+    'wallet': 32,
+    'other': 29
 }
 
 GITHUB_API_LIMIT_PER_HOUR = 5_000
@@ -119,52 +133,87 @@ async def send_req_until_success(session: aiohttp.ClientSession, **kwargs) -> Tu
     raise RuntimeError('Surprise. Time is over')
 
 
-async def send_telegram_alert(session: aiohttp.ClientSession, text: str, thread_id=None) -> aiohttp.ClientResponse:
+async def send_telegram_alert(session: aiohttp.ClientSession, text: str, thread_id: int) -> aiohttp.ClientResponse:
     params = {
-        'chat_id': CHAT_ID,
+        'chat_id': FORUM_CHAT_ID,
         'parse_mode': 'HTML',
         'text': text,
         'disable_web_page_preview': 1,
+        'message_thread_id': thread_id
     }
-    if thread_id:
-        params['chat_id'] = FORUM_CHAT_ID
-        params['message_thread_id'] = thread_id
 
     return await session.get(
         url=f'{BASE_TELEGRAM_API}{TELEGRAM_SEND_MESSAGE}'.format(token=TELEGRAM_BOT_TOKEN), params=params
     )
 
+def get_file_topics(filename):
+    """Определяет к каким топикам относится файл"""
+    topics = set()
+    
+    # Проверяем все категории кроме 'other'
+    for topic_name, patterns in HASHTAGS_PATTERNS.items():
+        if topic_name == 'other':
+            continue
+            
+        if isinstance(patterns, list):
+            for pattern in patterns:
+                if pattern and pattern in filename:
+                    topics.add(topic_name)
+        else:
+            if patterns and patterns in filename:
+                topics.add(topic_name)
+    
+    # Если файл не попал ни в одну категорию, добавляем в 'other'
+    if not topics:
+        topics.add('other')
+        
+    return topics
 
-async def send_discord_alert(
-        session: aiohttp.ClientSession, commit_hash: str, commit_url: str, fields: list, hashtags: str
-) -> aiohttp.ClientResponse:
-    url = f'https://discord.com/api/channels/{DISCORD_CHANNEL_ID}/messages'
-
-    headers = {
-        'Authorization': f'Bot {DISCORD_BOT_TOKEN}',
+def build_topic_alert(files, commit_hash, html_url, topic_name):
+    """Строит сообщение для конкретного топика"""
+    topic_titles = {
+        'stable': 'Telegram Stable Updates',
+        'beta': 'Telegram Beta Updates', 
+        'desktop': 'Desktop Updates',
+        'android': 'Android Updates',
+        'macos': 'macOS Updates',
+        'ios': 'iOS & iPadOS Updates', 
+        'web': 'Web Updates',
+        'translations': 'Translations Updates',
+        'server': 'Server Updates',
+        'wallet': 'Wallet Updates',
+        'other': 'Other Updates'  # Новая тема
     }
+    
+    title = topic_titles.get(topic_name, 'Telegram Updates')
+    
+    alert_text = f'<b>{title}</b>\n\n'
+    
+    changes = {k: [] for k in STATUS_TO_EMOJI.keys()}
+    for file in files:
+        changed_url = file['filename'].replace('.html', '')
+        for path_to_remove in PATHS_TO_REMOVE_FROM_ALERT:
+            if changed_url.startswith(path_to_remove):
+                changed_url = changed_url[len(path_to_remove) + 1:]
+                break
 
-    embed_data = {
-        'title': f'New changes in Telegram ({commit_hash})',
-        'color': 0xe685cc,
-        'url': commit_url,
-        'fields': fields,
-        'author': {
-            'name': 'Marshal',
-            'url': 'https://github.com/MarshalX',
-            'icon_url': 'https://avatars.githubusercontent.com/u/15520314?v=4',
-        },
-        'footer': {
-            'text': hashtags,
-        }
-    }
+        status = STATUS_TO_EMOJI[file['status']]
+        changes[file['status']].append(f'{status} <code>{changed_url}</code>')
 
-    payload = {
-        'embed': embed_data
-    }
+    for status, text_list in changes.items():
+        if not text_list:
+            continue
 
-    return await session.post(url=url, headers=headers, json=payload)
+        alert_text += '\n'.join(text_list[:ROW_PER_STATUS]) + '\n'
+        if len(text_list) > ROW_PER_STATUS:
+            count = len(text_list) - ROW_PER_STATUS
+            alert_text += f'And <b>{count}</b> {status} actions more..\n'
+        alert_text += '\n'
 
+    link_text = f'GitHub · CHUKEPC/telegram-crawler@{commit_hash}'
+    alert_text += f'<a href="{html_url}">{link_text}</a>'
+    
+    return alert_text
 
 async def main() -> None:
     async with aiohttp.ClientSession() as session:
@@ -200,76 +249,26 @@ async def main() -> None:
         commit_hash = commit_data['sha'][:7]
         html_url = commit_data['html_url']
 
-        alert_text = f'<b>New changes of Telegram</b>\n\n'
-        alert_hashtags = set()
+        sent_to_topics = set()
+        topic_files = {}
 
-        global AVAILABLE_HASHTAGS
-        available_hashtags = AVAILABLE_HASHTAGS.copy()
-
-        changes = {k: [] for k in STATUS_TO_EMOJI.keys()}
-        changes_md = {k: [] for k in STATUS_TO_EMOJI.keys()}
+        # Группируем файлы по топикам
         for file in commit_files:
-            for available_hashtag in available_hashtags:
-                pattern = HASHTAGS_PATTERNS[available_hashtag]
-                if pattern in file['filename']:
-                    alert_hashtags.add(available_hashtag)
+            file_topics = get_file_topics(file['filename'])
+            for topic in file_topics:
+                if topic not in topic_files:
+                    topic_files[topic] = []
+                topic_files[topic].append(file)
 
-            # optimize substring search
-            available_hashtags -= alert_hashtags
-
-            changed_url = file['filename'].replace('.html', '')
-            for path_to_remove in PATHS_TO_REMOVE_FROM_ALERT:
-                if changed_url.startswith(path_to_remove):
-                    changed_url = changed_url[len(path_to_remove) + 1:]
-                    break   # can't occur more than one time
-
-            status = STATUS_TO_EMOJI[file['status']]
-            changes[file['status']].append(f'{status} <code>{changed_url}</code>')
-            changes_md[file['status']].append(f'- {changed_url}')
-
-        discord_embed_fields = []
-        for i, [status, text_list] in enumerate(changes.items()):
-            if not text_list:
-                continue
-
-            alert_text += '\n'.join(text_list[:ROW_PER_STATUS]) + '\n'
-            discord_field_value = '\n'.join(changes_md[status][:ROW_PER_STATUS]) + '\n'
-
-            if len(text_list) > ROW_PER_STATUS:
-                count = len(text_list) - ROW_PER_STATUS
-                alert_text += f'And <b>{count}</b> {status} actions more..\n'
-                discord_field_value += f'And **{count}** {status} actions more..\n'
-
-            discord_embed_fields.append({
-                'name': f'{STATUS_TO_EMOJI[status]} {status.capitalize()}',
-                'value': discord_field_value,
-                'inline': False
-            })
-
-            alert_text += '\n'
-
-        link_text = f'GitHub · MarshalX/telegram-crawler@{commit_hash}'
-        alert_text += f'<a href="{html_url}">{link_text}</a>'
-        logger.info(alert_text)
-
-        if 'web_tr' in alert_hashtags or 'web_res' in alert_hashtags:
-            alert_hashtags.remove('web')
-
-        for hashtag, topic_thread_id in HASHTAG_TO_TOPIC.items():
-            if hashtag in alert_hashtags:
-                logger.info(f'Sending alert to the forum. Topic: {topic_thread_id}')
-                telegram_response = await send_telegram_alert(session, alert_text, topic_thread_id)
+        # Отправляем в каждый релевантный топик
+        for topic, files_in_topic in topic_files.items():
+            if topic in HASHTAG_TO_TOPIC and files_in_topic:
+                topic_alert_text = build_topic_alert(files_in_topic, commit_hash, html_url, topic)
+                thread_id = HASHTAG_TO_TOPIC[topic]
+                logger.info(f'Sending alert to topic: {topic} (ID: {thread_id})')
+                telegram_response = await send_telegram_alert(session, topic_alert_text, thread_id)
+                sent_to_topics.add(topic)
                 logger.debug(await telegram_response.read())
-
-        hashtags = ' '.join([f'#{hashtag}' for hashtag in sorted(alert_hashtags)])
-        if alert_hashtags:
-            alert_text += '\n\n' + hashtags
-
-        telegram_response = await send_telegram_alert(session, alert_text)
-        logger.debug(await telegram_response.read())
-
-        discord_response = await send_discord_alert(session, commit_hash, html_url, discord_embed_fields, hashtags)
-        logger.debug(await discord_response.read())
 
 
 if __name__ == '__main__':
