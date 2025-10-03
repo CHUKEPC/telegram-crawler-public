@@ -270,6 +270,8 @@ async def main() -> None:
                 sent_to_topics.add(topic)
                 logger.debug(await telegram_response.read())
 
+async def main_wrapper():
+    await main()
 
-if __name__ == '__main__':
-    asyncio.get_event_loop().run_until_complete(main())
+if __name__ == "__main__":
+    asyncio.run(main_wrapper())
