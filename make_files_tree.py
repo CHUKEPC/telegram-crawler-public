@@ -569,7 +569,7 @@ async def track_mtproto_methods():
     test_phone_code = str(test_dc) * 5
 
     app_test = Client('crawler_test', phone_number=test_phone_number, phone_code=test_phone_code, test_mode=True, **kw)
-    app = Client('crawler', session_string=os.environ['TELEGRAM_SESSION'], **kw)
+    app = Client("my_session")
 
     await asyncio.gather(app_test.start(), app.start())
     await asyncio.gather(_fetch_and_track_mtproto(app, ''), _fetch_and_track_mtproto(app_test, 'test'))
