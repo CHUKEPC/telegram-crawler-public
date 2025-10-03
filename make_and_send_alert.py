@@ -15,7 +15,7 @@ COMMIT_SHA = os.environ['COMMIT_SHA']
 # COMMIT_SHA = 'e2d725c2b3813d7c170f50b0ab21424a71466f6d' # web res
 
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
-GITHUB_PAT = os.environ['GIT_PAT']
+GITHUB_PAT = os.environ['GITHUB_PAT']
 
 REPOSITORY = os.environ.get('REPOSITORY', 'CHUKEPC/telegram-crawler-public')
 ROOT_TREE_DIR = os.environ.get('ROOT_TREE_DIR', 'data')
